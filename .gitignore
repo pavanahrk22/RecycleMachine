@@ -30,3 +30,6 @@ Thumbs.db
 # Firebase / Service Account Secrets
 *firebase-adminsdk*.json
 service-account*.json
+*serviceAccountKey*.json
+*.serviceAccount*.json
+

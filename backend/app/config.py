@@ -8,13 +8,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
-    GEMINI_MODEL: str = "gemini-3.8-flash"    
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    ENVIRONMENT: str = "development"
+    ENV: str = "dev"
+    ENVIRONMENT: str = "dev"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
     RATES_CONFIG_PATH: str = "config/rates.json"
     MOCK_CLASSIFICATION: bool = False
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""
 
     model_config = {
         "env_file": str(BASE_DIR / ".env"),
@@ -25,6 +27,12 @@ class Settings(BaseSettings):
     @property
     def cors_origins_list(self) -> List[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def is_dev(self) -> bool:
+        """Returns True if running in development mode (dev/development)."""
+        env_val = (self.ENV or self.ENVIRONMENT or "").strip().lower()
+        return env_val in ("dev", "development")
 
 def get_rates_config(config_path: str = None) -> Dict[str, Any]:
     """Load rates, bounds, and caps from JSON config file."""
@@ -54,7 +62,7 @@ def get_rates_config(config_path: str = None) -> Dict[str, Any]:
             },
             "min_confidence": 0.70,
             "points_per_rupee": 100,
-            "cooldown_seconds": 5,
+            "cooldown_seconds": 12,
             "daily_caps": {
                 "max_drops": 30,
                 "max_grams": 1000.0

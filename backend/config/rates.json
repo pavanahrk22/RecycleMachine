@@ -15,7 +15,7 @@
   },
   "min_confidence": 0.70,
   "points_per_rupee": 100,
-  "cooldown_seconds": 5,
+  "cooldown_seconds": 12,
   "daily_caps": {
     "max_drops": 30,
     "max_grams": 1000.0

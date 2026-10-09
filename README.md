@@ -8,73 +8,127 @@ CampusCycle is the software layer for smart campus reverse vending and recycling
 
 - **Frontend:** React (Vite), Tailwind CSS, Recharts
 - **Backend:** FastAPI, Python 3.12, Pydantic v2
-- **AI Classification:** Google GenAI SDK (`google-genai`), Gemini 2.5 Flash
-- **Database & Auth:** Firebase Auth (Google Sign-In) + Firestore
+- **AI Classification:** Google GenAI SDK (`google-genai`), Gemini 3.8 Flash
+- **Database & Auth:** Firebase Auth (Google Sign-In) + Firestore (Admin SDK)
 
 ---
 
-## Milestone 1: Core API & AI Classification Engine
+## Firestore Document Structure
 
-### Features Implemented
-1. **`/api/drop` Endpoint:** Accepts multipart image upload, simulated weight (`weight_g`), and `machine_id`.
-2. **Gemini Vision Classification:** Sends image bytes with structured schema (`ItemAnalysis`) to Gemini Flash with retry & timeout handling.
-3. **Config-Driven Rules Engine:**
-   - Rates loaded from `config/rates.json`
-   - Points formula: `points = round(weight_g / 100 * rate_per_100g)` with half-up rounding.
-   - Physical weight bounds checking per material (e.g. PET bottle 8–60g, can 8–25g, wrapper 1–12g).
-   - Multi-item detection and contamination rejection.
-   - Confidence threshold enforcement (minimum 0.70).
-4. **Automated Test Suite:** 12 unit and integration tests covering calculation, bounds, fraud conditions, and API behavior.
+### 1. `users/{uid}`
+Created automatically on the user's first request:
+```json
+{
+  "displayName": "student_pavana",
+  "email": "student_pavana@campus.edu",
+  "pointsBalance": 25,
+  "totalGrams": 25.0,
+  "totalItems": 1,
+  "createdAt": "2026-10-09T06:23:51.892000+00:00"
+}
+```
+
+### 2. `drops/{id}`
+Created inside a single Firestore transaction for each drop:
+```json
+{
+  "id": "drop_9673db44c565",
+  "uid": "student_pavana",
+  "machineId": "sim-machine-01",
+  "material": "pet_bottle",
+  "confidence": 0.95,
+  "contaminated": false,
+  "weightG": 25.0,
+  "points": 25,
+  "status": "accepted",
+  "rejectReason": null,
+  "imageHash": "bf6e855b67618763d38f0cd8c2ab5ea9aed7b28f4475939f040e4e3ac016bedc",
+  "createdAt": "2026-10-09T06:24:14.824651+00:00"
+}
+```
+*(Images are never stored; only the SHA-256 hash is kept for 24h duplicate fraud detection).*
+
+### 3. `stats/campus`
+Aggregated campus-wide metrics updated atomically on accepted drops:
+```json
+{
+  "totalGrams": 25.0,
+  "totalItems": 1,
+  "countsByMaterial": {
+    "pet_bottle": 1
+  }
+}
+```
 
 ---
 
-## Quickstart
+## Fraud & Abuse Controls Enforced Server-Side
+
+1. **SHA-256 Duplicate Detection:** Rejects identical photo hashes from the same user within 24 hours.
+2. **Cooldown Guard:** Rejects drops submitted within 12 seconds of the previous drop.
+3. **Daily Quota Caps:** Rejects drops if user exceeds 30 drops or 1000g total weight within 24 hours.
+4. **Physical Weight Bounds:** Validates simulated load-cell readings against material ranges (e.g. PET bottle 8–60g).
+5. **AI Contamination & Multi-Item Flags:** Rejects dirty, wet, food-stained, or multiple items.
+
+---
+
+## Quickstart & Running
 
 ### 1. Backend Setup
 ```bash
-# Navigate to backend and create virtual environment
 python -m venv backend/venv
-
-# Activate virtual environment
-# Windows:
 .\backend\venv\Scripts\activate
-
-# Install dependencies
 pip install -r backend/requirements.txt
 ```
 
-### 2. Configure Environment
-Copy `.env.example` to `.env`:
-```bash
-copy backend\.env.example backend\.env
+### 2. Configuration (`.env`)
+```env
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-3.8-flash
+ENV=dev
+GOOGLE_APPLICATION_CREDENTIALS=serviceAccountKey.json
 ```
-Set your `GEMINI_API_KEY` in `backend/.env`. (If testing offline or without an active key, you can set `MOCK_CLASSIFICATION=true`).
 
-### 3. Run the Backend Server
-```bash
-# From workspace root
-$env:PYTHONPATH="backend"
-.\backend\venv\Scripts\uvicorn app.main:app --reload --port 8000
-```
-API Documentation will be available at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
-
-### 4. Run Test Suite
-```bash
+### 3. Run Tests (22 Passing Tests)
+```powershell
 $env:PYTHONPATH="backend"
 .\backend\venv\Scripts\pytest backend/tests -v
 ```
 
-### 5. Test with curl
+### 4. Start Server
+```powershell
+$env:PYTHONPATH="backend"
+.\backend\venv\Scripts\uvicorn app.main:app --reload --port 8000
+```
+
+---
+
+## Endpoint Curl Examples
+
+### Health Check (Public)
 ```bash
-# Accepted drop test
-curl.exe -X POST "http://127.0.0.1:8000/api/drop" `
+curl.exe -s http://127.0.0.1:8000/health
+```
+
+### Get My Profile (`GET /api/me`)
+```bash
+# In Dev mode using X-Dev-User bypass:
+curl.exe -s -H "X-Dev-User: student_pavana" http://127.0.0.1:8000/api/me
+
+# In Production using Firebase ID Token:
+curl.exe -s -H "Authorization: Bearer <FIREBASE_ID_TOKEN>" https://your-backend.run.app/api/me
+```
+
+### Submit Item (`POST /api/drop`)
+```bash
+curl.exe -s -X POST "http://127.0.0.1:8000/api/drop" `
+  -H "X-Dev-User: student_pavana" `
   -F "image=@backend/sample_item.png;type=image/png" `
   -F "weight_g=25.0" `
   -F "machine_id=sim-machine-01"
+```
 
-# Rejected drop test (out of bounds weight: 80g for PET bottle)
-curl.exe -X POST "http://127.0.0.1:8000/api/drop" `
-  -F "image=@backend/sample_item.png;type=image/png" `
-  -F "weight_g=80.0" `
-  -F "machine_id=sim-machine-01"
+### Get My Drops History (`GET /api/drops?limit=20`)
+```bash
+curl.exe -s -H "X-Dev-User: student_pavana" "http://127.0.0.1:8000/api/drops?limit=20"
 ```
