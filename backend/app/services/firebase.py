@@ -109,6 +109,7 @@ def init_firebase():
             logger.error(f"Failed to initialize Firebase Admin with key {found_path}: {e}")
 
     logger.warning("No valid Firebase service account found. Using in-memory Firestore engine for dev/test.")
+    if not settings.is_dev: raise RuntimeError('Firebase service account missing or failed to load')
     _db = InMemoryFirestore()
     _is_mock_db = True
     return _db
@@ -122,6 +123,7 @@ def get_db():
 def verify_firebase_token(token: str) -> Dict[str, Any]:
     """Verify Firebase ID token. In mock mode or dev, handles token parsing."""
     try:
+        init_firebase()
         decoded = auth.verify_id_token(token)
         return {
             "uid": decoded["uid"],
