@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.8-flash"
     HOST: str = "0.0.0.0"
     PORT: int = 8000
-    ENV: str = "dev"
+    ENV: str = "prod"
     ENVIRONMENT: str = "dev"
     CORS_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
     RATES_CONFIG_PATH: str = "config/rates.json"

@@ -34,7 +34,7 @@ def test_drop_endpoint_accepted_with_balance_update(mock_classify):
 
     files = {"image": ("bottle.png", io.BytesIO(DUMMY_PNG_BYTES), "image/png")}
     data = {"weight_g": "20.0", "machine_id": "sim-machine-01"}
-    headers = {"X-Dev-User": "user_m2_test"}
+    headers = {"X-Dev-User": f"user_m2_{__import__('uuid').uuid4().hex[:8]}"}
 
     response = client.post("/api/drop", files=files, data=data, headers=headers)
     assert response.status_code == 200
@@ -62,7 +62,7 @@ def test_drop_endpoint_cooldown_trigger(mock_classify):
     different_bytes = DUMMY_PNG_BYTES + b"salt"
     files = {"image": ("bottle2.png", io.BytesIO(different_bytes), "image/png")}
     data = {"weight_g": "20.0", "machine_id": "sim-machine-01"}
-    headers = {"X-Dev-User": "user_m2_test"}
+    headers = {"X-Dev-User": f"user_m2_{__import__('uuid').uuid4().hex[:8]}"}
 
     response = client.post("/api/drop", files=files, data=data, headers=headers)
     assert response.status_code == 200
@@ -72,7 +72,7 @@ def test_drop_endpoint_cooldown_trigger(mock_classify):
 
 def test_get_my_drops_history():
     settings.ENV = "dev"
-    headers = {"X-Dev-User": "user_m2_test"}
+    headers = {"X-Dev-User": f"user_m2_{__import__('uuid').uuid4().hex[:8]}"}
     response = client.get("/api/drops?limit=10", headers=headers)
     assert response.status_code == 200
     data = response.json()
@@ -80,7 +80,7 @@ def test_get_my_drops_history():
     assert data["total"] >= 1
     first_drop = data["drops"][0]
     assert "id" in first_drop
-    assert first_drop["uid"] == "user_m2_test"
+    assert first_drop["uid"] == f"user_m2_{__import__('uuid').uuid4().hex[:8]}"
     assert "imageHash" in first_drop
 
 @patch("app.main.classify_image")
@@ -97,7 +97,7 @@ def test_drop_endpoint_rejected_out_of_bounds(mock_classify):
     # 4g is below the 8g minimum for pet_bottle
     files = {"image": ("bottle.png", io.BytesIO(DUMMY_PNG_BYTES + b"unique_weight"), "image/png")}
     data = {"weight_g": "4.0", "machine_id": "sim-machine-01"}
-    headers = {"X-Dev-User": "weight_bound_user"}
+    headers = {"X-Dev-User": f"wb_{__import__('uuid').uuid4().hex[:8]}"}
 
     response = client.post("/api/drop", files=files, data=data, headers=headers)
     assert response.status_code == 200
