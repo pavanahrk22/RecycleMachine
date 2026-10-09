@@ -1,134 +1,108 @@
-# CampusCycle ♻️
+# CampusCycle
 
-CampusCycle is the software layer for smart campus reverse vending and recycling machines. Students deposit recyclable items (bottles, cans, rigid plastics, snack wrappers), AI identifies the item and detects contamination/multiple objects, and the backend converts weight readings into reward points redeemable for campus perks.
+**A software-only recycling machine prototype for Smart Campus.**
+Drop a bottle or wrapper, get verified rewards, see the campus impact.
 
----
+PromptWars x Error Zero (Hack2skill, Google for Developers) | Track: Smart Campus
 
-## Architecture & Tech Stack
+- Live app: https://recyclemachinesoftware.web.app
+- API: https://recyclemachine.onrender.com (free tier, first request can take 30-60 s: open `/health` first)
 
-- **Frontend:** React (Vite), Tailwind CSS, Recharts
-- **Backend:** FastAPI, Python 3.12, Pydantic v2
-- **AI Classification:** Google GenAI SDK (`google-genai`), Gemini 3.8 Flash
-- **Database & Auth:** Firebase Auth (Google Sign-In) + Firestore (Admin SDK)
+## Problem
 
----
+Campus bins mix recyclables with trash, and nothing rewards students for sorting waste correctly. Existing reverse-vending machines are expensive hardware that most campuses will never buy.
 
-## Firestore Document Structure
+## Solution
 
-### 1. `users/{uid}`
-Created automatically on the user's first request:
-```json
-{
-  "displayName": "student_pavana",
-  "email": "student_pavana@campus.edu",
-  "pointsBalance": 25,
-  "totalGrams": 25.0,
-  "totalItems": 1,
-  "createdAt": "2026-10-09T06:23:51.892000+00:00"
-}
+CampusCycle is the software layer of a recycling machine, built so a cheap physical unit can plug in later.
+
+1. A student signs in with Google and drops an item at the web kiosk (webcam or upload, plus a simulated load-cell weight).
+2. `POST /api/drop` sends the image to Gemini vision, which classifies the item and rejects contaminated or multi-item drops.
+3. The backend checks weight bounds, confidence, cooldown, daily caps and duplicates, then converts weight to points.
+4. Points go into a wallet and can be redeemed for a mock canteen/store coupon.
+5. A dashboard shows campus-wide impact (items, kg diverted, rewards, material breakdown, leaderboard).
+
+**Hardware story:** a real machine only needs a Raspberry Pi, a camera and a load cell calling the same `POST /api/drop` endpoint. Nothing else changes.
+
+## Screenshots
+
+| Kiosk: item accepted | Duplicate rejected |
+|---|---|
+| ![kiosk](docs/screenshots/01-kiosk-accepted.png) | ![duplicate](docs/screenshots/02-duplicate-rejected.png) |
+
+| Redeem: coupon issued | Impact dashboard |
+|---|---|
+| ![redeem](docs/screenshots/03-redeem-coupon.png) | ![impact](docs/screenshots/04-impact.png) |
+
+## Points and rules
+
+Rates live in `backend/config/rates.json` (configurable).
+
+| Material | Rate | Valid weight |
+|---|---|---|
+| PET bottle | 100 pts / 100 g | 8-60 g |
+| Aluminium can | 150 pts / 100 g | 8-25 g |
+| Rigid plastic | 80 pts / 100 g | 5-150 g |
+| Snack wrapper | 50 pts / 100 g | 1-12 g |
+| Non-recyclable / no item | 0 | n/a |
+
+100 points = Rs 1. Points round up. Minimum AI confidence 0.70.
+
+## Anti-fraud and privacy
+
+- Points are computed on the backend only; the client never sends points.
+- Weight must fall inside the plausible range for the detected material.
+- Gemini rejects contaminated items and multiple items in one drop.
+- SHA-256 image hash blocks the same image from the same user within 24 h.
+- 12 s cooldown per user; daily cap of 30 drops or 1000 g per user.
+- Images are never stored; only the hash is kept.
+- Redeem is server-validated and runs inside a Firestore transaction; coupon codes are generated server-side.
+
+## Architecture
+
+```
+React kiosk (Firebase Hosting)  --Firebase ID token-->  FastAPI (Render)
+                                                          |-- Gemini vision (classifier)
+                                                          |-- rules engine (bounds, caps, hash)
+                                                          '-- Firestore (users, drops, redemptions, stats/campus)
 ```
 
-### 2. `drops/{id}`
-Created inside a single Firestore transaction for each drop:
-```json
-{
-  "id": "drop_9673db44c565",
-  "uid": "student_pavana",
-  "machineId": "sim-machine-01",
-  "material": "pet_bottle",
-  "confidence": 0.95,
-  "contaminated": false,
-  "weightG": 25.0,
-  "points": 25,
-  "status": "accepted",
-  "rejectReason": null,
-  "imageHash": "bf6e855b67618763d38f0cd8c2ab5ea9aed7b28f4475939f040e4e3ac016bedc",
-  "createdAt": "2026-10-09T06:24:14.824651+00:00"
-}
-```
-*(Images are never stored; only the SHA-256 hash is kept for 24h duplicate fraud detection).*
+- Frontend: Vite, React, Tailwind, Firebase Auth, Recharts, React Router
+- Backend: FastAPI, Firebase Admin, Google Gemini (`gemini-3.8-flash`)
+- Data: Firestore with atomic transactions for drops and redemptions
 
-### 3. `stats/campus`
-Aggregated campus-wide metrics updated atomically on accepted drops:
-```json
-{
-  "totalGrams": 25.0,
-  "totalItems": 1,
-  "countsByMaterial": {
-    "pet_bottle": 1
-  }
-}
+API: `POST /api/drop`, `GET /api/me`, `GET /api/drops`, `POST /api/redeem`, `GET /api/stats`, `GET /health`.
+
+## Run locally
+
+Backend (from `backend`):
+
+```
+python -m venv venv
+.\venv\Scripts\pip install -r requirements.txt
+copy .env.example .env      # then fill in your own values
+.\venv\Scripts\uvicorn app.main:app --reload --port 8000
 ```
 
----
+Frontend (from `frontend`):
 
-## Fraud & Abuse Controls Enforced Server-Side
-
-1. **SHA-256 Duplicate Detection:** Rejects identical photo hashes from the same user within 24 hours.
-2. **Cooldown Guard:** Rejects drops submitted within 12 seconds of the previous drop.
-3. **Daily Quota Caps:** Rejects drops if user exceeds 30 drops or 1000g total weight within 24 hours.
-4. **Physical Weight Bounds:** Validates simulated load-cell readings against material ranges (e.g. PET bottle 8–60g).
-5. **AI Contamination & Multi-Item Flags:** Rejects dirty, wet, food-stained, or multiple items.
-
----
-
-## Quickstart & Running
-
-### 1. Backend Setup
-```bash
-python -m venv backend/venv
-.\backend\venv\Scripts\activate
-pip install -r backend/requirements.txt
+```
+npm install
+copy .env.example .env      # then fill in your own Firebase values
+npm run dev
 ```
 
-### 2. Configuration (`.env`)
-```env
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-3.8-flash
-ENV=dev
-GOOGLE_APPLICATION_CREDENTIALS=serviceAccountKey.json
-```
+Tests: `.\venv\Scripts\python.exe -m pytest -q` (Gemini is mocked).
 
-### 3. Run Tests (22 Passing Tests)
-```powershell
-$env:PYTHONPATH="backend"
-.\backend\venv\Scripts\pytest backend/tests -v
-```
+## Limitations (honest)
 
-### 4. Start Server
-```powershell
-$env:PYTHONPATH="backend"
-.\backend\venv\Scripts\uvicorn app.main:app --reload --port 8000
-```
+- Weight is simulated by a slider; no real load cell is connected.
+- Classification was checked only on a small, controlled demo set (clean bottle, can, wrapper, dirty item, multi-item). Real accuracy needs a larger labelled dataset.
+- Coupons are mock. Funding rewards (scrap buyers or campus budget) and the point rates need real-world validation.
+- Gemini free tier is limited to a few requests per minute and per day, and can return temporary 503s under load.
+- The Render free instance sleeps when idle, so the first request is slow.
+- Rejected duplicate drops show a generic "Flagged Drop" card with 0% confidence (cosmetic).
 
----
+## Roadmap
 
-## Endpoint Curl Examples
-
-### Health Check (Public)
-```bash
-curl.exe -s http://127.0.0.1:8000/health
-```
-
-### Get My Profile (`GET /api/me`)
-```bash
-# In Dev mode using X-Dev-User bypass:
-curl.exe -s -H "X-Dev-User: student_pavana" http://127.0.0.1:8000/api/me
-
-# In Production using Firebase ID Token:
-curl.exe -s -H "Authorization: Bearer <FIREBASE_ID_TOKEN>" https://your-backend.run.app/api/me
-```
-
-### Submit Item (`POST /api/drop`)
-```bash
-curl.exe -s -X POST "http://127.0.0.1:8000/api/drop" `
-  -H "X-Dev-User: student_pavana" `
-  -F "image=@backend/sample_item.png;type=image/png" `
-  -F "weight_g=25.0" `
-  -F "machine_id=sim-machine-01"
-```
-
-### Get My Drops History (`GET /api/drops?limit=20`)
-```bash
-curl.exe -s -H "X-Dev-User: student_pavana" "http://127.0.0.1:8000/api/drops?limit=20"
-```
+Raspberry Pi + camera + load-cell client, admin review of flagged drops, daily bonuses, Hindi/Kannada UI, a labelled dataset for accuracy measurement.
