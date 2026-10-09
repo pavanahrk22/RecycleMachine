@@ -32,6 +32,10 @@ async function request(endpoint, options = {}) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
+  if (options.body && typeof options.body === "string" && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const url = `${API_BASE_URL}${endpoint}`;
 
   let response;
@@ -101,6 +105,28 @@ export async function getMyProfile() {
  */
 export async function getMyDrops(limit = 20) {
   return await request(`/api/drops?limit=${encodeURIComponent(limit)}`, {
+    method: "GET",
+  });
+}
+
+/**
+ * Redeem reward points for mock coupon code
+ * POST /api/redeem
+ */
+export async function redeemPoints(points = null) {
+  const body = points ? JSON.stringify({ points: Number(points) }) : JSON.stringify({});
+  return await request("/api/redeem", {
+    method: "POST",
+    body,
+  });
+}
+
+/**
+ * Fetch campus impact statistics and leaderboard
+ * GET /api/stats
+ */
+export async function getCampusStats() {
+  return await request("/api/stats", {
     method: "GET",
   });
 }

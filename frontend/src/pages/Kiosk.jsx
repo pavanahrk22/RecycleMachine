@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { dropItem, ApiError } from "../api/client";
 
+const COOLDOWN_SECONDS = 12;
+
 const MATERIAL_LABELS = {
   pet_bottle: "PET Bottle",
   aluminium_can: "Aluminium Can",
@@ -156,15 +158,15 @@ export default function Kiosk() {
 
       setDropResult(response);
 
-      // Start 12s cooldown after every drop attempt
-      setCooldownRemaining(12);
+      // Start cooldown after every drop attempt
+      setCooldownRemaining(COOLDOWN_SECONDS);
     } catch (err) {
       console.error("Drop request error:", err);
       const isRetry = err instanceof ApiError ? err.retryable : true;
       setIsRetryable(isRetry);
       setErrorMessage(err.message || "Failed to process item drop. Please try again.");
-      // Apply 12s cooldown if error occurred
-      setCooldownRemaining(12);
+      // Apply cooldown if error occurred
+      setCooldownRemaining(COOLDOWN_SECONDS);
     } finally {
       setSubmitting(false);
     }

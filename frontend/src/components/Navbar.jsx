@@ -25,7 +25,7 @@ export default function Navbar() {
           </div>
 
           {/* Desktop Nav Items */}
-          <div className="hidden md:flex items-center space-x-6">
+          <div className="hidden md:flex items-center space-x-4">
             <Link
               to="/"
               className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -34,7 +34,7 @@ export default function Navbar() {
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
               }`}
             >
-              Machine Kiosk
+              Kiosk
             </Link>
             <Link
               to="/wallet"
@@ -44,22 +44,42 @@ export default function Navbar() {
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
               }`}
             >
-              My Wallet
+              Wallet
+            </Link>
+            <Link
+              to="/redeem"
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                isActive("/redeem")
+                  ? "bg-emerald-50 text-emerald-700 font-semibold"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+              }`}
+            >
+              Redeem
+            </Link>
+            <Link
+              to="/impact"
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                isActive("/impact")
+                  ? "bg-emerald-50 text-emerald-700 font-semibold"
+                  : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
+              }`}
+            >
+              Impact
             </Link>
 
             {user && (
-              <div className="flex items-center space-x-3 pl-4 border-l border-slate-200">
+              <div className="flex items-center space-x-3 pl-3 border-l border-slate-200">
                 <div className="text-right">
                   <p className="text-xs font-semibold text-slate-800 leading-tight">
                     {user.displayName || "Student"}
                   </p>
-                  <p className="text-[11px] text-slate-500 leading-tight truncate max-w-[140px]">
+                  <p className="text-[11px] text-slate-500 leading-tight truncate max-w-[130px]">
                     {user.email}
                   </p>
                 </div>
                 <button
                   onClick={signOut}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-md transition-colors"
+                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-md transition-colors cursor-pointer"
                 >
                   Sign out
                 </button>
@@ -93,7 +113,7 @@ export default function Navbar() {
             to="/"
             onClick={() => setMobileMenuOpen(false)}
             className={`block px-3 py-2 rounded-md text-base font-medium ${
-              isActive("/") ? "bg-emerald-50 text-emerald-700" : "text-slate-700 hover:bg-slate-50"
+              isActive("/") ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
             }`}
           >
             Machine Kiosk
@@ -102,10 +122,28 @@ export default function Navbar() {
             to="/wallet"
             onClick={() => setMobileMenuOpen(false)}
             className={`block px-3 py-2 rounded-md text-base font-medium ${
-              isActive("/wallet") ? "bg-emerald-50 text-emerald-700" : "text-slate-700 hover:bg-slate-50"
+              isActive("/wallet") ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
             }`}
           >
             My Wallet
+          </Link>
+          <Link
+            to="/redeem"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`block px-3 py-2 rounded-md text-base font-medium ${
+              isActive("/redeem") ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Redeem Points
+          </Link>
+          <Link
+            to="/impact"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`block px-3 py-2 rounded-md text-base font-medium ${
+              isActive("/impact") ? "bg-emerald-50 text-emerald-700 font-semibold" : "text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            Impact Dashboard
           </Link>
 
           {user && (

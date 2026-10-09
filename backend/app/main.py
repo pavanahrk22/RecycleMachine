@@ -1,11 +1,22 @@
 import logging
+import random
+import string
 from typing import Optional, Dict, Any, List
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status, Depends, Query
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, status, Depends, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings, get_rates_config
-from app.schemas import DropResponse, UserProfile, DropRecord, DropsListResponse, HealthResponse
+from app.schemas import (
+    DropResponse,
+    UserProfile,
+    DropRecord,
+    DropsListResponse,
+    HealthResponse,
+    RedeemRequest,
+    RedeemResponse,
+    CampusStatsResponse
+)
 from app.services.classifier import classify_image, GeminiBusyException
 from app.services.image_processor import compute_sha256, preprocess_image
 from app.services.rules_engine import evaluate_drop
@@ -15,7 +26,10 @@ from app.services.firebase import (
     check_fraud_and_limits,
     save_drop_record,
     get_user_profile,
-    get_user_drops
+    get_user_drops,
+    execute_redeem_transaction,
+    get_campus_stats,
+    get_top_leaderboard
 )
 
 logging.basicConfig(
@@ -27,7 +41,7 @@ logger = logging.getLogger("campuscycle")
 app = FastAPI(
     title="CampusCycle API",
     description="Backend API for CampusCycle Smart Campus Recycling System",
-    version="0.2.0"
+    version="0.3.0"
 )
 
 # CORS middleware
@@ -245,4 +259,107 @@ async def process_drop(
         rejectReason=reject_reason,
         newBalance=updated_balance,
         machineId=machine_id
+    )
+
+@app.post(
+    "/api/redeem",
+    response_model=RedeemResponse,
+    response_model_by_alias=True,
+    tags=["Rewards"]
+)
+async def redeem_points(
+    request: Optional[RedeemRequest] = Body(default=None),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    POST /api/redeem:
+    - Minimum 100 points required.
+    - In ONE Firestore transaction: re-reads user, verifies balance, deducts points.
+    - Generates mock uppercase coupon code ('CC-XXXXXX').
+    - Returns coupon code, points redeemed, and new balance.
+    """
+    uid = current_user["uid"]
+    profile = get_user_profile(uid) or current_user
+    current_balance = profile.get("pointsBalance", 0)
+
+    if current_balance < 100:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Minimum 100 points required to redeem coupons. Current balance: {current_balance} pts."
+        )
+
+    # Validate or compute points to redeem (multiple of 100)
+    if request and request.points is not None:
+        if request.points <= 0 or request.points % 100 != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Points to redeem must be a positive multiple of 100."
+            )
+        if request.points > current_balance:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Insufficient points balance ({current_balance} pts) for requested {request.points} pts."
+            )
+        points_to_redeem = request.points
+    else:
+        # Default to redeeming full multiple of 100
+        points_to_redeem = (current_balance // 100) * 100
+
+    rupees = points_to_redeem // 100
+    random_code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    coupon_code = f"CC-{random_code}"
+
+    try:
+        new_balance, red_doc = execute_redeem_transaction(
+            uid=uid,
+            points_to_redeem=points_to_redeem,
+            coupon_code=coupon_code,
+            rupees=rupees
+        )
+    except ValueError as val_err:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(val_err)
+        )
+    except Exception as exc:
+        logger.error(f"Redemption transaction failed for user {uid}: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to process redemption transaction. Please try again."
+        )
+
+    logger.info(
+        f"Redemption successful: user={uid}, redeemed={points_to_redeem} pts (Rs {rupees}), "
+        f"coupon={coupon_code}, newBalance={new_balance}"
+    )
+
+    return RedeemResponse(
+        couponCode=coupon_code,
+        pointsRedeemed=points_to_redeem,
+        newBalance=new_balance,
+        rupees=rupees
+    )
+
+@app.get(
+    "/api/stats",
+    response_model=CampusStatsResponse,
+    response_model_by_alias=True,
+    tags=["Campus Stats"]
+)
+async def get_campus_impact_stats(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    GET /api/stats:
+    - Returns campus totals (totalGrams, totalItems, countsByMaterial).
+    - Returns top-5 leaderboard by totalGrams from users (first name + last initial masked, never email).
+    """
+    campus_stats = get_campus_stats()
+    leaderboard = get_top_leaderboard(limit=5)
+
+    return CampusStatsResponse(
+        totalGrams=campus_stats.get("totalGrams", 0.0),
+        totalItems=campus_stats.get("totalItems", 0),
+        countsByMaterial=campus_stats.get("countsByMaterial", {}),
+        leaderboard=leaderboard
     )

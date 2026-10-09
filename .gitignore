@@ -33,3 +33,7 @@ service-account*.json
 *serviceAccountKey*.json
 *.serviceAccount*.json
 
+
+firebase-debug.log
+
+frontend/.firebase/

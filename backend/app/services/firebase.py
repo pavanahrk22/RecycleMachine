@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
@@ -15,11 +16,31 @@ logger = logging.getLogger("campuscycle.firebase")
 _db = None
 _is_mock_db = False
 
+def mask_user_name(display_name: Optional[str], email: Optional[str]) -> str:
+    """Format name as first name plus last initial, never exposing email."""
+    name = (display_name or "").strip()
+    if not name or "@" in name:
+        if email and "@" in email:
+            name = email.split("@")[0]
+        else:
+            return "Student"
+
+    tokens = [t for t in re.split(r"[\s_.]+", name) if t]
+    if not tokens:
+        return "Student"
+
+    first = tokens[0].capitalize()
+    if len(tokens) >= 2 and tokens[1]:
+        last_initial = tokens[1][0].upper()
+        return f"{first} {last_initial}."
+    return first
+
 class InMemoryFirestore:
     """Fast, thread-safe in-memory mock Firestore for dev/testing when serviceAccountKey is absent."""
     def __init__(self):
         self.users: Dict[str, Dict[str, Any]] = {}
         self.drops: Dict[str, Dict[str, Any]] = {}
+        self.redemptions: Dict[str, Dict[str, Any]] = {}
         self.stats: Dict[str, Dict[str, Any]] = {
             "campus": {
                 "totalGrams": 0.0,
@@ -36,7 +57,7 @@ class InMemoryFirestore:
 
     def get_drops_for_user(self, uid: str, limit: int = 20) -> List[Dict[str, Any]]:
         user_drops = [d for d in self.drops.values() if d.get("uid") == uid]
-        user_drops.sort(key=lambda d: d.get("createdAt", ""), reverse=True)
+        user_drops.sort(key=lambda d: str(d.get("createdAt", "")), reverse=True)
         return user_drops[:limit]
 
     def execute_drop_transaction(
@@ -74,6 +95,34 @@ class InMemoryFirestore:
             counts[material] = counts.get(material, 0) + 1
 
         return user.get("pointsBalance", 0)
+
+    def execute_redeem_transaction(
+        self,
+        uid: str,
+        points_to_redeem: int,
+        coupon_code: str,
+        rupees: int
+    ) -> Tuple[int, Dict[str, Any]]:
+        user = self.users.get(uid)
+        current_balance = user.get("pointsBalance", 0) if user else 0
+        if current_balance < points_to_redeem:
+            raise ValueError(f"Insufficient balance ({current_balance} pts) to redeem {points_to_redeem} pts.")
+
+        user["pointsBalance"] = current_balance - points_to_redeem
+        self.users[uid] = user
+
+        red_id = f"red_{uuid.uuid4().hex[:12]}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        red_doc = {
+            "id": red_id,
+            "uid": uid,
+            "points": points_to_redeem,
+            "rupees": rupees,
+            "couponCode": coupon_code,
+            "createdAt": now_iso
+        }
+        self.redemptions[red_id] = red_doc
+        return user["pointsBalance"], red_doc
 
 def init_firebase():
     """Initializes Firebase Admin SDK with service account or falls back to in-memory store in dev."""
@@ -206,13 +255,12 @@ def check_fraud_and_limits(
 
     if drops:
         # 1. Cooldown check: Check most recent drop
-        drops_sorted = sorted(drops, key=lambda d: d.get("createdAt", ""), reverse=True)
+        drops_sorted = sorted(drops, key=lambda d: str(d.get("createdAt", "")), reverse=True)
         latest_drop = drops_sorted[0]
         latest_time_str = latest_drop.get("createdAt")
         if latest_time_str:
             try:
-                # Handle ISO timestamps with or without timezone
-                latest_time = datetime.fromisoformat(latest_time_str.replace("Z", "+00:00"))
+                latest_time = datetime.fromisoformat(str(latest_time_str).replace("Z", "+00:00"))
                 elapsed = (now - latest_time).total_seconds()
                 if elapsed < cooldown_seconds:
                     wait_sec = int(cooldown_seconds - elapsed) + 1
@@ -223,14 +271,14 @@ def check_fraud_and_limits(
         # 2. Duplicate image hash check within 24 hours
         for d in drops:
             if d.get("imageHash") == image_hash:
-                d_time_str = d.get("createdAt", "")
+                d_time_str = str(d.get("createdAt", ""))
                 if d_time_str >= twenty_four_hours_ago:
                     return False, "Duplicate image detected. You cannot resubmit the same photo within 24 hours."
 
         # 3. Daily caps: sum accepted drops in last 24h
         recent_accepted = [
             d for d in drops
-            if d.get("status") == "accepted" and d.get("createdAt", "") >= twenty_four_hours_ago
+            if d.get("status") == "accepted" and str(d.get("createdAt", "")) >= twenty_four_hours_ago
         ]
         if len(recent_accepted) >= max_drops:
             return False, f"Daily limit of {max_drops} drops reached. Please return tomorrow."
@@ -319,6 +367,50 @@ def save_drop_record(
     new_balance = _run_in_transaction(transaction)
     return drop_data, new_balance
 
+def execute_redeem_transaction(
+    uid: str,
+    points_to_redeem: int,
+    coupon_code: str,
+    rupees: int
+) -> Tuple[int, Dict[str, Any]]:
+    """In ONE Firestore transaction: re-read users/{uid}, verify balance >= 100, deduct points, create redemptions/{id}."""
+    db = get_db()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    red_id = f"red_{uuid.uuid4().hex[:12]}"
+    red_doc = {
+        "id": red_id,
+        "uid": uid,
+        "points": points_to_redeem,
+        "rupees": rupees,
+        "couponCode": coupon_code,
+        "createdAt": now_iso
+    }
+
+    if _is_mock_db:
+        return db.execute_redeem_transaction(uid, points_to_redeem, coupon_code, rupees)
+
+    transaction = db.transaction()
+    user_ref = db.collection("users").document(uid)
+    red_ref = db.collection("redemptions").document(red_id)
+
+    @firestore.transactional
+    def _run_redeem(txn):
+        user_snap = user_ref.get(transaction=txn)
+        if not user_snap.exists:
+            raise ValueError("User profile not found.")
+        user_data = user_snap.to_dict()
+        current_balance = user_data.get("pointsBalance", 0)
+        if current_balance < points_to_redeem:
+            raise ValueError(f"Insufficient balance ({current_balance} pts) to redeem {points_to_redeem} pts.")
+
+        new_balance = current_balance - points_to_redeem
+        txn.update(user_ref, {"pointsBalance": new_balance})
+        txn.set(red_ref, red_doc)
+        return new_balance
+
+    new_balance = _run_redeem(transaction)
+    return new_balance, red_doc
+
 def get_user_profile(uid: str) -> Optional[Dict[str, Any]]:
     """Return user profile and balance."""
     db = get_db()
@@ -343,3 +435,53 @@ def get_user_drops(uid: str, limit: int = 20) -> List[Dict[str, Any]]:
     drops = [d.to_dict() for d in docs]
     drops.sort(key=lambda d: str(d.get("createdAt", "")), reverse=True)
     return drops[:limit]
+
+def get_campus_stats() -> Dict[str, Any]:
+    """Return campus aggregates from stats/campus (zeros if missing)."""
+    db = get_db()
+    if _is_mock_db:
+        campus = db.stats.get("campus", {})
+        return {
+            "totalGrams": float(campus.get("totalGrams", 0.0)),
+            "totalItems": int(campus.get("totalItems", 0)),
+            "countsByMaterial": dict(campus.get("countsByMaterial", {}))
+        }
+
+    snap = db.collection("stats").document("campus").get()
+    if snap.exists:
+        data = snap.to_dict()
+        return {
+            "totalGrams": float(data.get("totalGrams", 0.0)),
+            "totalItems": int(data.get("totalItems", 0)),
+            "countsByMaterial": dict(data.get("countsByMaterial", {}))
+        }
+    return {
+        "totalGrams": 0.0,
+        "totalItems": 0,
+        "countsByMaterial": {}
+    }
+
+def get_top_leaderboard(limit: int = 5) -> List[Dict[str, Any]]:
+    """Return top-N leaderboard by totalGrams from users with masked names."""
+    db = get_db()
+    users_list = []
+    if _is_mock_db:
+        users_list = list(db.users.values())
+    else:
+        docs = db.collection("users").stream()
+        for doc in docs:
+            users_list.append(doc.to_dict())
+
+    # Sort by totalGrams descending
+    users_list.sort(key=lambda u: float(u.get("totalGrams", 0.0)), reverse=True)
+    top_users = users_list[:limit]
+
+    leaderboard = []
+    for rank, u in enumerate(top_users, start=1):
+        leaderboard.append({
+            "rank": rank,
+            "displayName": mask_user_name(u.get("displayName"), u.get("email")),
+            "totalGrams": float(u.get("totalGrams", 0.0)),
+            "totalItems": int(u.get("totalItems", 0))
+        })
+    return leaderboard

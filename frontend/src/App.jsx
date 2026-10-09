@@ -6,6 +6,8 @@ import ProtectedRoute from "./components/ProtectedRoute";
 import Login from "./pages/Login";
 import Kiosk from "./pages/Kiosk";
 import Wallet from "./pages/Wallet";
+import Redeem from "./pages/Redeem";
+import Impact from "./pages/Impact";
 
 function Layout({ children }) {
   const { user } = useAuth();
@@ -40,6 +42,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <Wallet />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/redeem"
+              element={
+                <ProtectedRoute>
+                  <Redeem />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/impact"
+              element={
+                <ProtectedRoute>
+                  <Impact />
                 </ProtectedRoute>
               }
             />

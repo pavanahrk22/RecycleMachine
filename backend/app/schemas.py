@@ -74,6 +74,33 @@ class DropsListResponse(BaseModel):
     drops: List[DropRecord]
     total: int
 
+class RedeemRequest(BaseModel):
+    points: Optional[int] = None
+
+class RedeemResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    coupon_code: str = Field(alias="couponCode")
+    points_redeemed: int = Field(alias="pointsRedeemed")
+    new_balance: int = Field(alias="newBalance")
+    rupees: int
+
+class LeaderboardEntry(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    rank: int
+    display_name: str = Field(alias="displayName")
+    total_grams: float = Field(alias="totalGrams")
+    total_items: int = Field(alias="totalItems")
+
+class CampusStatsResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    total_grams: float = Field(alias="totalGrams")
+    total_items: int = Field(alias="totalItems")
+    counts_by_material: Dict[str, int] = Field(alias="countsByMaterial")
+    leaderboard: List[LeaderboardEntry]
+
 class HealthResponse(BaseModel):
     status: str
     service: str
