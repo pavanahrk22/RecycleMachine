@@ -1,0 +1,23 @@
+{
+  "rates_per_100g": {
+    "pet_bottle": 100,
+    "aluminium_can": 150,
+    "rigid_plastic": 80,
+    "snack_wrapper": 50,
+    "non_recyclable": 0,
+    "no_item": 0
+  },
+  "weight_bounds_g": {
+    "pet_bottle": { "min": 8.0, "max": 60.0 },
+    "aluminium_can": { "min": 8.0, "max": 25.0 },
+    "rigid_plastic": { "min": 5.0, "max": 150.0 },
+    "snack_wrapper": { "min": 1.0, "max": 12.0 }
+  },
+  "min_confidence": 0.70,
+  "points_per_rupee": 100,
+  "cooldown_seconds": 5,
+  "daily_caps": {
+    "max_drops": 30,
+    "max_grams": 1000.0
+  }
+}
